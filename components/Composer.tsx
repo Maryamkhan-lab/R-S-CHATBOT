@@ -1,37 +1,41 @@
 "use client"
 
-import { useRef, useState, forwardRef, useImperativeHandle, useEffect } from "react"
+import React, { useRef, useState, forwardRef, useImperativeHandle, useEffect } from "react"
 import { Send, Loader2, Plus, Mic } from "lucide-react"
 import ComposerActionsPopover from "./ComposerActionsPopover"
 import { cls } from "./utils"
 
-const Composer = forwardRef(function Composer({ onSend, busy }, ref) {
+export interface ComposerHandle {
+  insertTemplate: (templateContent: string) => void;
+  focus: () => void;
+}
+
+interface ComposerProps {
+  onSend: (text: string) => Promise<void> | void;
+  busy: boolean;
+}
+
+const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({ onSend, busy }, ref) {
   const [value, setValue] = useState("")
   const [sending, setSending] = useState(false)
-  const [isFocused, setIsFocused] = useState(false)
   const [lineCount, setLineCount] = useState(1)
-  const inputRef = useRef(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (inputRef.current) {
       const textarea = inputRef.current
-      const lineHeight = 20 // Approximate line height in pixels
+      const lineHeight = 20
       const minHeight = 40
-
-      // Reset height to calculate scroll height
       textarea.style.height = "auto"
       const scrollHeight = textarea.scrollHeight
-      const calculatedLines = Math.max(1, Math.floor((scrollHeight - 16) / lineHeight)) // 16px for padding
-
+      const calculatedLines = Math.max(1, Math.floor((scrollHeight - 16) / lineHeight)) 
       setLineCount(calculatedLines)
 
       if (calculatedLines <= 12) {
-        // Auto-expand for 1-12 lines
         textarea.style.height = `${Math.max(minHeight, scrollHeight)}px`
         textarea.style.overflowY = "hidden"
       } else {
-        // Fixed height with scroll for 12+ lines
-        textarea.style.height = `${minHeight + 11 * lineHeight}px` // 12 lines total
+        textarea.style.height = `${minHeight + 11 * lineHeight}px`
         textarea.style.overflowY = "auto"
       }
     }
@@ -40,7 +44,7 @@ const Composer = forwardRef(function Composer({ onSend, busy }, ref) {
   useImperativeHandle(
     ref,
     () => ({
-      insertTemplate: (templateContent) => {
+      insertTemplate: (templateContent: string) => {
         setValue((prev) => {
           const newValue = prev ? `${prev}\n\n${templateContent}` : templateContent
           setTimeout(() => {
@@ -60,17 +64,27 @@ const Composer = forwardRef(function Composer({ onSend, busy }, ref) {
 
   async function handleSend() {
     if (!value.trim() || sending) return
+    
+    const textToSend = value; // Capture value
     setSending(true)
+    
+    // ✅ FIX: Clear input immediately
+    setValue("")
+    
     try {
-      await onSend?.(value)
-      setValue("")
-      inputRef.current?.focus()
+      // We await this only to track the "sending" state (network request start),
+      // not the whole stream duration.
+      await onSend?.(textToSend)
+      
+      // Focus back on input after sending starts
+      setTimeout(() => inputRef.current?.focus(), 10)
+    } catch (e) {
+      // If error, restore text so user doesn't lose it
+      setValue(textToSend)
     } finally {
       setSending(false)
     }
   }
-
-  const hasContent = value.length > 0
 
   return (
     <div className="border-t border-zinc-200/60 p-4 dark:border-zinc-800">
@@ -85,8 +99,6 @@ const Composer = forwardRef(function Composer({ onSend, busy }, ref) {
             ref={inputRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
             placeholder="How can I help you today?"
             rows={1}
             className={cls(
@@ -135,22 +147,6 @@ const Composer = forwardRef(function Composer({ onSend, busy }, ref) {
             </button>
           </div>
         </div>
-      </div>
-
-      <div className="mx-auto mt-2 max-w-3xl px-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-        Press{" "}
-        <kbd className="rounded border border-zinc-300 bg-zinc-50 px-1 dark:border-zinc-600 dark:bg-zinc-800">
-          Enter
-        </kbd>{" "}
-        to send ·{" "}
-        <kbd className="rounded border border-zinc-300 bg-zinc-50 px-1 dark:border-zinc-600 dark:bg-zinc-800">
-          Shift
-        </kbd>
-        +
-        <kbd className="rounded border border-zinc-300 bg-zinc-50 px-1 dark:border-zinc-600 dark:bg-zinc-800">
-          Enter
-        </kbd>{" "}
-        for newline
       </div>
     </div>
   )

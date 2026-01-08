@@ -7,23 +7,24 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { getMe, updateMe, getAvatarImage } from "@/lib/api"
+import { api } from "@/lib/api" // Using the updated API definition
+import { ArrowLeft, Upload, User as UserIcon } from "lucide-react"
 
 export default function ProfilePage() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  // State
+  const [mounted, setMounted] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [profileImage, setProfileImage] = useState<string | null>(null)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
-  const [avatarFile, setAvatarFile] = useState<File | null>(null)
   
+  // Form State
   const [formData, setFormData] = useState({
     name: "",
     email: "",
-    currentPassword: "",
     newPassword: "",
     confirmPassword: "",
   })
@@ -31,32 +32,24 @@ export default function ProfilePage() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [successMessage, setSuccessMessage] = useState("")
 
+  // --- 1. Load User Data ---
   useEffect(() => {
+    setMounted(true)
     const loadUserData = async () => {
       try {
-        const accessToken = localStorage.getItem("accessToken")
-        if (!accessToken) {
-          router.push("/login")
-          return
-        }
-
-        const userData = await getMe(accessToken)
+        const user = await api.user.getProfile()
         
-        setIsAuthenticated(true)
         setFormData(prev => ({
           ...prev,
-          name: userData.name || "",
-          email: userData.email || "",
+          name: user.full_name || "",
+          email: user.email || "",
         }))
 
-        if (userData.avatar) {
-          const avatarUrl = await getAvatarImage(userData.avatar)
-          if (avatarUrl) {
-            setProfileImage(avatarUrl)
-          }
+        if (user.avatar_url) {
+          setProfileImage(user.avatar_url)
         }
       } catch (err) {
-        console.error("[v0] Error loading user:", err)
+        console.error("Error loading user:", err)
         router.push("/login")
       } finally {
         setIsLoading(false)
@@ -66,47 +59,32 @@ export default function ProfilePage() {
     loadUserData()
   }, [router])
 
+  // --- 2. Handlers ---
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target
-    setFormData(prev => ({
-      ...prev,
-      [id]: value
-    }))
-    if (errors[id]) {
-      setErrors(prev => ({
-        ...prev,
-        [id]: ""
-      }))
-    }
+    setFormData(prev => ({ ...prev, [id]: value }))
+    if (errors[id]) setErrors(prev => ({ ...prev, [id]: "" }))
   }
 
   const handleProfileImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       if (!file.type.startsWith('image/')) {
-        setErrors(prev => ({
-          ...prev,
-          profileImage: "Please upload a valid image file"
-        }))
+        setErrors(prev => ({ ...prev, profileImage: "Please upload a valid image file" }))
         return
       }
-      if (file.size > 5 * 1024 * 1024) {
-        setErrors(prev => ({
-          ...prev,
-          profileImage: "Image size should be less than 5MB"
-        }))
+      // 5MB limit to allow for larger high-res avatars
+      if (file.size > 5 * 1024 * 1024) { 
+        setErrors(prev => ({ ...prev, profileImage: "Image size should be less than 5MB" }))
         return
       }
 
-      setAvatarFile(file)
       const reader = new FileReader()
       reader.onloadend = () => {
         const result = reader.result as string
         setPreviewImage(result)
-        setErrors(prev => ({
-          ...prev,
-          profileImage: ""
-        }))
+        setErrors(prev => ({ ...prev, profileImage: "" }))
       }
       reader.readAsDataURL(file)
     }
@@ -119,23 +97,13 @@ export default function ProfilePage() {
     setSuccessMessage("")
 
     try {
+      // 1. Validation
       const newErrors: Record<string, string> = {}
+      if (!formData.name.trim()) newErrors.name = "Name is required"
       
-      if (!formData.name.trim()) {
-        newErrors.name = "Name is required"
-      }
-      if (!formData.email.trim()) {
-        newErrors.email = "Email is required"
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-        newErrors.email = "Please enter a valid email"
-      }
-
       if (formData.newPassword || formData.confirmPassword) {
-        if (!formData.currentPassword) {
-          newErrors.currentPassword = "Current password is required to change password"
-        }
-        if (formData.newPassword.length < 8) {
-          newErrors.newPassword = "New password must be at least 8 characters"
+        if (formData.newPassword.length < 6) {
+          newErrors.newPassword = "Password must be at least 6 characters"
         }
         if (formData.newPassword !== formData.confirmPassword) {
           newErrors.confirmPassword = "Passwords do not match"
@@ -148,65 +116,75 @@ export default function ProfilePage() {
         return
       }
 
-      const accessToken = localStorage.getItem("accessToken")
-      if (!accessToken) {
-        router.push("/login")
-        return
+      // 2. Prepare Payload
+      // Using the specific interface we defined in api.ts
+      const payload: { full_name?: string; avatar_url?: string; password?: string } = {
+        full_name: formData.name,
       }
 
-      await updateMe(
-        accessToken,
-        formData.name,
-        formData.email,
-        formData.newPassword || undefined,
-        avatarFile || undefined
-      )
+      // Only send avatar_url if a new one was selected
+      if (previewImage) {
+        payload.avatar_url = previewImage
+      }
 
+      // Only send password if user typed one
+      if (formData.newPassword) {
+        payload.password = formData.newPassword
+      }
+
+      // 3. Call API
+      const updatedUser = await api.user.updateProfile(payload)
+
+      // 4. Update Local State & Cache
       if (previewImage) {
         setProfileImage(previewImage)
         setPreviewImage(null)
-        setAvatarFile(null)
+      }
+      
+      // Update LocalStorage to reflect changes immediately
+      const cachedUser = localStorage.getItem("user")
+      if (cachedUser) {
+        const parsed = JSON.parse(cachedUser)
+        localStorage.setItem("user", JSON.stringify({ 
+          ...parsed, 
+          full_name: updatedUser.full_name || formData.name, 
+          avatar_url: updatedUser.avatar_url || parsed.avatar_url 
+        }))
       }
 
+      // Clear password fields
       setFormData(prev => ({
         ...prev,
-        currentPassword: "",
         newPassword: "",
         confirmPassword: "",
       }))
 
       setSuccessMessage("Profile updated successfully!")
       setTimeout(() => setSuccessMessage(""), 3000)
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to save profile"
-      console.error("[v0] Error saving profile:", error)
-      setErrors({ submit: errorMessage })
+
+    } catch (error: any) {
+      console.error("Save error:", error)
+      setErrors({ submit: error.message || "Failed to save profile" })
     } finally {
       setIsSaving(false)
     }
   }
 
   const handleLogout = () => {
-    localStorage.removeItem("accessToken")
-    localStorage.removeItem("refreshToken")
-    localStorage.removeItem("tokenType")
-    localStorage.removeItem("authToken")
+    api.auth.logout()
     router.push("/login")
   }
 
-  if (isLoading) {
+  // --- 3. Loading State (Hydration Safe) ---
+  if (!mounted || isLoading) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
         <div className="text-center">
           <div className="inline-flex h-8 w-8 animate-spin rounded-full border-4 border-zinc-300 border-t-zinc-900 dark:border-zinc-700 dark:border-t-white"></div>
-          <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">Loading...</p>
+          <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">Loading profile...</p>
         </div>
       </div>
     )
-  }
-
-  if (!isAuthenticated) {
-    return null
   }
 
   return (
@@ -236,231 +214,159 @@ export default function ProfilePage() {
         <button
           onClick={() => router.push("/")}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
-          aria-label="Back to chat"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          <ArrowLeft className="w-5 h-5" />
           Back
         </button>
       </div>
 
-      <div className="w-full max-w-2xl float-card">
+      <div className="w-full max-w-2xl float-card mt-12 md:mt-0">
         <div className="bg-white dark:bg-slate-900/80 rounded-3xl shadow-2xl dark:shadow-lg overflow-hidden border border-white/30 dark:border-slate-700/50 backdrop-blur-sm">
-          {/* Card Header */}
+          
+          {/* Header */}
           <div className="px-6 md:px-8 pt-8 md:pt-10 pb-6 text-center border-b border-gray-200 dark:border-slate-700">
             <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               Profile Settings
             </h1>
             <p className="text-base text-gray-600 dark:text-gray-400">
-              Manage your account information and preferences
+              Manage your account information
             </p>
           </div>
 
-          {/* Card Content */}
+          {/* Content */}
           <div className="px-6 md:px-8 py-8 md:py-10">
-            {/* Success Message */}
             {successMessage && (
               <div className="mb-6 p-4 rounded-lg bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-800">
-                <p className="text-green-800 dark:text-green-300 font-medium" role="alert">
-                  {successMessage}
-                </p>
+                <p className="text-green-800 dark:text-green-300 font-medium">{successMessage}</p>
               </div>
             )}
 
-            {/* Error Message */}
             {errors.submit && (
               <div className="mb-6 p-4 rounded-lg bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-800">
-                <p className="text-red-800 dark:text-red-300 font-medium" role="alert">
-                  {errors.submit}
-                </p>
+                <p className="text-red-800 dark:text-red-300 font-medium">{errors.submit}</p>
               </div>
             )}
 
             <form onSubmit={handleSaveProfile} className="space-y-8">
-              {/* Profile Picture Section */}
+              {/* Profile Image */}
               <div className="flex flex-col items-center gap-4">
-                <div className="relative">
-                  <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-purple-400 to-pink-500 p-1">
+                <div className="relative group">
+                  <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-purple-400 to-pink-500 p-1 shadow-md">
                     {previewImage || profileImage ? (
                       <img 
                         src={previewImage || profileImage || ""} 
                         alt="Profile"
-                        className="w-full h-full rounded-full object-cover"
+                        className="w-full h-full rounded-full object-cover bg-white dark:bg-zinc-900"
                       />
                     ) : (
                       <div className="w-full h-full rounded-full bg-white dark:bg-slate-800 flex items-center justify-center">
-                        <svg className="w-12 h-12 text-gray-400 dark:text-gray-500" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                        </svg>
+                        <UserIcon className="w-12 h-12 text-gray-400" />
                       </div>
                     )}
                   </div>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="absolute bottom-0 right-0 p-2 rounded-full bg-purple-600 hover:bg-purple-700 text-white shadow-lg transition-colors"
-                    aria-label="Upload profile picture"
+                    className="absolute bottom-0 right-0 p-2 rounded-full bg-purple-600 hover:bg-purple-700 text-white shadow-lg transition-transform hover:scale-105"
                   >
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                    </svg>
+                    <Upload className="w-4 h-4" />
                   </button>
                 </div>
+                
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
                   onChange={handleProfileImageUpload}
                   className="hidden"
-                  aria-label="Profile picture upload"
                 />
-                {errors.profileImage && (
-                  <p className="text-sm text-red-600 dark:text-red-400">{errors.profileImage}</p>
-                )}
-                <p className="text-sm text-gray-600 dark:text-gray-400">Click the icon to upload a new picture</p>
-              </div>
-
-              {/* Divider */}
-              <div className="border-t border-gray-200 dark:border-slate-700"></div>
-
-              {/* Name Input */}
-              <div className="space-y-2">
-                <Label 
-                  htmlFor="name" 
-                  className="text-sm font-semibold text-gray-700 dark:text-gray-300"
-                >
-                  Full Name
-                </Label>
-                <Input
-                  id="name"
-                  type="text"
-                  placeholder="Your full name"
-                  value={formData.name}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-purple-500 dark:focus:border-purple-400 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-500/30 transition-all duration-200 text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-800 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                  aria-label="Full name"
-                />
-                {errors.name && (
-                  <p className="text-sm text-red-600 dark:text-red-400">{errors.name}</p>
-                )}
-              </div>
-
-              {/* Email Input */}
-              <div className="space-y-2">
-                <Label 
-                  htmlFor="email" 
-                  className="text-sm font-semibold text-gray-700 dark:text-gray-300"
-                >
-                  Email Address
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="your@example.com"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border-2 border-gray-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-purple-500 dark:focus:border-purple-400 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-500/30 transition-all duration-200 text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-800 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                  aria-label="Email address"
-                />
-                {errors.email && (
-                  <p className="text-sm text-red-600 dark:text-red-400">{errors.email}</p>
-                )}
-              </div>
-
-              {/* Password Change Section */}
-              <div className="space-y-4 p-4 rounded-lg bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                  Change Password (Optional)
-                </h3>
-
-                {/* Current Password */}
-                <div className="space-y-2">
-                  <Label 
-                    htmlFor="currentPassword" 
-                    className="text-sm font-semibold text-gray-700 dark:text-gray-300"
-                  >
-                    Current Password
-                  </Label>
-                  <Input
-                    id="currentPassword"
-                    type="password"
-                    placeholder="Enter your current password"
-                    value={formData.currentPassword}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-purple-500 dark:focus:border-purple-400 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-500/30 transition-all duration-200 text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-800 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                    aria-label="Current password"
-                  />
-                  {errors.currentPassword && (
-                    <p className="text-sm text-red-600 dark:text-red-400">{errors.currentPassword}</p>
+                
+                <div className="text-center">
+                  {errors.profileImage && (
+                    <p className="text-sm text-red-600 dark:text-red-400 mb-1">{errors.profileImage}</p>
                   )}
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Click the upload icon to change photo
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 dark:border-slate-700" />
+
+              {/* Form Fields */}
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    className="py-3"
+                  />
+                  {errors.name && <p className="text-sm text-red-500">{errors.name}</p>}
                 </div>
 
-                {/* New Password */}
                 <div className="space-y-2">
-                  <Label 
-                    htmlFor="newPassword" 
-                    className="text-sm font-semibold text-gray-700 dark:text-gray-300"
-                  >
-                    New Password
-                  </Label>
+                  <Label htmlFor="email">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={formData.email}
+                    disabled // Emails are immutable
+                    className="py-3 bg-gray-50 dark:bg-slate-800/50 text-gray-500 cursor-not-allowed"
+                  />
+                  <p className="text-xs text-gray-400">Email cannot be changed</p>
+                </div>
+              </div>
+
+              {/* Password Section */}
+              <div className="space-y-4 p-5 rounded-xl bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">Change Password</h3>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="newPassword">New Password</Label>
                   <Input
                     id="newPassword"
                     type="password"
-                    placeholder="Enter your new password"
+                    placeholder="Leave blank to keep current"
                     value={formData.newPassword}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-purple-500 dark:focus:border-purple-400 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-500/30 transition-all duration-200 text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-800 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                    aria-label="New password"
                   />
-                  {errors.newPassword && (
-                    <p className="text-sm text-red-600 dark:text-red-400">{errors.newPassword}</p>
-                  )}
                 </div>
 
-                {/* Confirm Password */}
                 <div className="space-y-2">
-                  <Label 
-                    htmlFor="confirmPassword" 
-                    className="text-sm font-semibold text-gray-700 dark:text-gray-300"
-                  >
-                    Confirm New Password
-                  </Label>
+                  <Label htmlFor="confirmPassword">Confirm New Password</Label>
                   <Input
                     id="confirmPassword"
                     type="password"
-                    placeholder="Confirm your new password"
+                    placeholder="Confirm new password"
                     value={formData.confirmPassword}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-3 border-2 border-gray-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-purple-500 dark:focus:border-purple-400 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-500/30 transition-all duration-200 text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-800 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                    aria-label="Confirm new password"
                   />
-                  {errors.confirmPassword && (
-                    <p className="text-sm text-red-600 dark:text-red-400">{errors.confirmPassword}</p>
-                  )}
+                  {errors.confirmPassword && <p className="text-sm text-red-500">{errors.confirmPassword}</p>}
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-4">
+              {/* Actions */}
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <Button
                   type="submit"
-                  className="flex-1 py-3 md:py-4 font-semibold text-base rounded-lg bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 dark:from-purple-500 dark:to-pink-500 dark:hover:from-purple-600 dark:hover:to-pink-600 text-white transition-all duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 py-6 font-semibold bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white shadow-md hover:shadow-lg transition-all"
                   disabled={isSaving}
-                  aria-busy={isSaving}
                 >
                   {isSaving ? "Saving..." : "Save Changes"}
                 </Button>
+                
                 <Button
                   type="button"
                   onClick={handleLogout}
                   variant="outline"
-                  className="flex-1 py-3 md:py-4 border-2 border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-all duration-200 font-semibold text-gray-800 dark:text-gray-100"
-                  aria-label="Sign out from profile"
+                  className="flex-1 py-6 border-2 font-semibold hover:bg-red-50 hover:text-red-600 hover:border-red-200 dark:hover:bg-red-950/30 dark:hover:text-red-400 dark:hover:border-red-800 transition-colors"
                 >
                   Sign Out
                 </Button>
               </div>
+
             </form>
           </div>
         </div>

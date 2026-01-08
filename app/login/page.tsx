@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { login } from "@/lib/api"
+import { login } from "@/lib/api" // Imports the function we created above
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -21,35 +21,44 @@ export default function LoginPage() {
     e.preventDefault()
     setError("")
     setIsLoading(true)
+
     try {
+      // Call the API
       const response = await login(email, password)
       
+      // Save tokens and user info
       localStorage.setItem("accessToken", response.access_token)
       localStorage.setItem("refreshToken", response.refresh_token)
       localStorage.setItem("tokenType", response.token_type)
-      localStorage.setItem("authToken", JSON.stringify({ 
+      
+      // Store user details for simple session checking
+      localStorage.setItem("user", JSON.stringify(response.user))
+      localStorage.setItem("authSession", JSON.stringify({ 
         email, 
         authenticated: true, 
-        timestamp: Date.now(),
-        accessToken: response.access_token
+        timestamp: Date.now() 
       }))
       
+      // Redirect to Dashboard/Home
       router.push("/")
+      
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Login failed"
       setError(errorMessage)
-      console.error("[v0] Login error:", err)
+      console.error("Login Error:", err)
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleSocialLogin = (provider: string) => {
-    console.log("[v0] Social login with:", provider)
+    console.log("Social login with:", provider)
+    // Future implementation: window.location.href = `${API_BASE_URL}/auth/login/${provider.toLowerCase()}`
   }
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      {/* Background Gradients */}
       <div 
         className="absolute inset-0 -z-10 dark:hidden"
         style={{
@@ -164,6 +173,7 @@ export default function LoginPage() {
               className="w-full py-3 md:py-4 border-2 border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 font-medium text-gray-800 dark:text-gray-100"
               aria-label="Sign in with Google"
             >
+              {/* Google SVG Icon */}
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
                 <path
                   fill="#4285F4"
