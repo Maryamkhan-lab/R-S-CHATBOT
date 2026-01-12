@@ -1,7 +1,7 @@
 "use client"
 
 import React from 'react'
-import { SquarePen, User as UserIcon } from 'lucide-react' 
+import { User as UserIcon, PanelLeft } from 'lucide-react' 
 import { cls } from './utils'
 import Link from 'next/link'
 
@@ -31,24 +31,24 @@ export default function Header({
   }
 
   return (
-    // ✅ Added 'shrink-0' to prevent the header from squishing when chat is full
     <header className="shrink-0 sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200/60 bg-white/80 px-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
       
-      {/* Left: App Branding (Acts as Sidebar Toggle on Mobile) */}
+      {/* Left: Sidebar Toggle + Brand */}
       <div className="flex items-center gap-2">
+        {/* ✅ ADDED: Mobile Sidebar Unlock/Open Button */}
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="md:hidden -ml-2 rounded-xl p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          aria-label="Open Sidebar"
+        >
+          <PanelLeft className="h-5 w-5" />
+        </button>
+
         <button
           onClick={() => setSidebarOpen(true)}
           className="text-sm font-bold tracking-tight text-zinc-900 dark:text-zinc-100 hover:opacity-70 transition-opacity"
         >
           R&D Chatbot
-        </button>
-        
-        {/* Mobile New Chat Icon */}
-        <button 
-          onClick={createNewChat}
-          className="md:hidden text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 ml-2"
-        >
-          <SquarePen className="h-5 w-5" />
         </button>
       </div>
 

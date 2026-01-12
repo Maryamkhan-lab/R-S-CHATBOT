@@ -169,7 +169,6 @@ export default function Sidebar({
         await api.chat.rename(id, newTitle)
     } catch (e) {
         console.error("Rename failed", e)
-        // Revert on fail if needed, or just let it be for now
     }
   }
 
@@ -217,7 +216,8 @@ export default function Sidebar({
       <motion.aside
         initial={{ width: 320 }}
         animate={{ width: 64 }}
-        className="z-50 flex h-full shrink-0 flex-col border-r border-zinc-200/60 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+        // ✅ CHANGED: Increased z-index to 100 to stay above Composer
+        className="z-[100] flex h-full shrink-0 flex-col border-r border-zinc-200/60 bg-white dark:border-zinc-800 dark:bg-zinc-900"
       >
         <div className="flex items-center justify-center border-b border-zinc-200/60 px-3 py-3 dark:border-zinc-800">
           <button onClick={() => setSidebarCollapsed(false)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -247,7 +247,8 @@ export default function Sidebar({
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/60 md:hidden"
+            // ✅ CHANGED: Increased z-index to 90 (above Composer's z-50)
+            className="fixed inset-0 z-[90] bg-black/60 md:hidden"
             onClick={onClose}
           />
         )}
@@ -262,7 +263,8 @@ export default function Sidebar({
             exit={{ x: -340 }}
             transition={{ type: "spring", stiffness: 260, damping: 28 }}
             className={cls(
-              "z-50 flex h-full w-80 shrink-0 flex-col border-r border-zinc-200/60 bg-white dark:border-zinc-800 dark:bg-zinc-900",
+              // ✅ CHANGED: Increased z-index to 100
+              "z-[100] flex h-full w-80 shrink-0 flex-col border-r border-zinc-200/60 bg-white dark:border-zinc-800 dark:bg-zinc-900",
               isMobile ? "fixed inset-y-0 left-0" : "static translate-x-0"
             )}
           >
@@ -334,7 +336,7 @@ export default function Sidebar({
                         onSelect(c.id)
                         if (isMobile) onClose()
                       }}
-                      onRename={(newTitle: string) => handleRenameChat(c.id, newTitle)} // ✅ Passed onRename
+                      onRename={(newTitle: string) => handleRenameChat(c.id, newTitle)}
                       onDelete={() => handleDeleteChat(c.id)}
                       showMeta={true}
                     />
