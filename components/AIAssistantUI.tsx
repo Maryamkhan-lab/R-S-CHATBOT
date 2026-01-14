@@ -15,6 +15,8 @@ export default function AIAssistantUI() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [isThinking, setIsThinking] = useState(false)
+  
+  // Refs for stream control
   const isStreamingRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   
@@ -59,9 +61,9 @@ export default function AIAssistantUI() {
      setConversations(chats)
   }
 
-  // ✅ FIXED: Prevent clearing messages if AI is currently streaming/thinking
+  // Prevent clearing messages if AI is currently streaming
   useEffect(() => {
-    if (isStreamingRef.current) return // <--- CRITICAL FIX
+    if (isStreamingRef.current) return 
 
     if (!selectedId || selectedId.startsWith("new_")) {
         setMessages([])
@@ -77,7 +79,7 @@ export default function AIAssistantUI() {
       }
     }
     loadMessages()
-  }, [selectedId]) // Removed isThinking from dependency to avoid double-firing
+  }, [selectedId])
 
   const createNewChat = () => {
     if (abortControllerRef.current) abortControllerRef.current.abort()
@@ -102,8 +104,9 @@ export default function AIAssistantUI() {
     const ac = new AbortController()
     abortControllerRef.current = ac
 
+    // ✅ FIX: Use crypto.randomUUID() to match DB types
     const tempUserMsg: Message = {
-      id: Math.random().toString(),
+      id: crypto.randomUUID(), 
       chat_id: selectedId || "temp",
       role: "user",
       content: content,
@@ -111,9 +114,8 @@ export default function AIAssistantUI() {
       is_summarized: false
     }
     
-    // This placeholder ensures the "Thinking..." bubble appears in the message list
     const tempAiMsg: Message = {
-      id: "ai-placeholder",
+      id: crypto.randomUUID(),
       chat_id: selectedId || "temp",
       role: "assistant",
       content: "",
@@ -121,7 +123,6 @@ export default function AIAssistantUI() {
       is_summarized: false
     }
 
-    // Set streaming flag BEFORE state update to block the useEffect
     isStreamingRef.current = true
     setIsThinking(true)
     setMessages(prev => [...prev, tempUserMsg, tempAiMsg])
@@ -155,36 +156,66 @@ export default function AIAssistantUI() {
             content: "Error: " + error, created_at: new Date().toISOString(), is_summarized: false 
         }])
       },
-      () => {
+      async () => {
         setIsThinking(false)
         isStreamingRef.current = false
         abortControllerRef.current = null
+        
+        // Refresh to get real IDs from DB
+        if (activeThreadId) {
+            try {
+                const fresh = await api.chat.getDetails(activeThreadId)
+                if (fresh) setMessages(fresh)
+            } catch (e) {}
+        }
       },
       ac.signal
     )
   }
 
+  // ✅ UPDATED: Edit Message Logic (Truncate & Regenerate)
   const handleEditMessage = async (msgId: string, newContent: string) => {
+    // 1. Abort any running streams
     if (abortControllerRef.current) abortControllerRef.current.abort()
     const ac = new AbortController()
     abortControllerRef.current = ac
 
-    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: newContent } : m))
+    // 2. Manipulate State: 
+    // - Find message
+    // - Cut off everything AFTER it
+    // - Update content
+    // - Add new AI placeholder
+    setMessages(prev => {
+        const msgIndex = prev.findIndex(m => m.id === msgId)
+        if (msgIndex === -1) return prev
+
+        // Slice history up to the edited message (exclusive of what followed)
+        const history = prev.slice(0, msgIndex)
+
+        // The updated user message
+        const updatedUserMsg = { ...prev[msgIndex], content: newContent }
+
+        // New placeholder for AI response
+        const newAiMsg: Message = {
+            id: crypto.randomUUID(), // Valid UUID
+            chat_id: selectedId || "",
+            role: "assistant",
+            content: "", // Starts empty for streaming
+            created_at: new Date().toISOString(),
+            is_summarized: false
+        }
+
+        // Return: [Old History] + [Edited User Msg] + [New AI Placeholder]
+        return [...history, updatedUserMsg, newAiMsg]
+    })
     
-    const msgIndex = messages.findIndex(m => m.id === msgId)
-    if (msgIndex === -1) return
-    
-    const truncatedMessages = messages.slice(0, msgIndex + 1)
-    setMessages([...truncatedMessages, { 
-        id: "ai-regen", chat_id: selectedId!, role: "assistant", 
-        content: "", created_at: new Date().toISOString(), is_summarized: false 
-    }])
-    
+    // 3. Set flags for UI
     isStreamingRef.current = true
     setIsThinking(true)
 
     let currentResponse = ""
 
+    // 4. Call API
     await api.editMessage(
         msgId, 
         newContent,
@@ -193,14 +224,25 @@ export default function AIAssistantUI() {
             setMessages(prev => {
                 const newArr = [...prev]
                 const lastIdx = newArr.length - 1
-                newArr[lastIdx] = { ...newArr[lastIdx], content: currentResponse }
+                // Update the last message (the AI placeholder)
+                if (lastIdx >= 0 && newArr[lastIdx].role === "assistant") {
+                    newArr[lastIdx] = { ...newArr[lastIdx], content: currentResponse }
+                }
                 return newArr
             })
         },
-        () => {
+        async () => {
             setIsThinking(false)
             isStreamingRef.current = false
             abortControllerRef.current = null
+
+            // 5. Refresh from DB to ensure state is synced
+            if (selectedId) {
+                try {
+                    const freshMsgs = await api.chat.getDetails(selectedId)
+                    if (freshMsgs) setMessages(freshMsgs)
+                } catch (e) { console.error(e) }
+            }
         },
         ac.signal
     )
@@ -257,6 +299,7 @@ export default function AIAssistantUI() {
           conversations={conversations} 
           userData={userData}
           onDeleteChat={handleDeleteChat}
+          createNewChat={createNewChat}
         />
 
         <main className="relative flex min-w-0 flex-1 flex-col">
@@ -272,7 +315,7 @@ export default function AIAssistantUI() {
             ref={composerRef}
             conversation={activeConversation}
             onSend={handleSend}
-            onEditMessage={handleEditMessage}
+            onEditMessage={handleEditMessage} 
             onResendMessage={() => {}} 
             isThinking={isThinking}
             onPauseThinking={handlePauseThinking}

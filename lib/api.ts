@@ -219,19 +219,20 @@ export const api = {
     }
   },
 
+  // src/lib/api.ts -> inside api object -> editMessage function
   editMessage: async (
     messageId: string, 
     newContent: string,
     onChunk: (content: string) => void,
     onDone: () => void,
-    signal?: AbortSignal // 🆕 Add this parameter here too
+    signal?: AbortSignal
   ) => {
     try {
       const response = await fetch(`${API_BASE_URL}/chat/message/edit`, {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify({ message_id: messageId, new_content: newContent }),
-        signal: signal, // 🆕 Pass signal
+        signal: signal,
       });
 
       if (!response.body) return;
@@ -252,7 +253,13 @@ export const api = {
             }
             try {
               const parsed = JSON.parse(dataStr);
-              if (parsed.content) onChunk(parsed.content);
+              // ✅ FIX: Handle errors explicitly
+              if (parsed.error) {
+                console.error("Stream Error:", parsed.error);
+                onChunk(`\n\n**Error:** ${parsed.error}`); // Show error in chat bubble
+              } else if (parsed.content) {
+                onChunk(parsed.content);
+              }
             } catch {}
           }
         }
@@ -261,4 +268,4 @@ export const api = {
       if (err.name !== 'AbortError') console.error("Edit stream failed", err);
     }
   }
-};
+}
