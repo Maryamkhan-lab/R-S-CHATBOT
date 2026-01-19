@@ -1,7 +1,7 @@
 // src/lib/api.ts
 
 // --- Configuration ---
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://maryamizat-r-s-rag.hf.space";
 const INGESTION_BASE_URL = "https://hammad712-ingestion.hf.space";
 
 // --- Types & Interfaces ---
